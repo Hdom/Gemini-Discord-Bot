@@ -17,7 +17,8 @@ import {
 } from 'discord.js';
 import {
   HarmBlockThreshold,
-  HarmCategory
+  HarmCategory,
+  ThinkingLevel
 } from '@google/genai';
 import fs from 'fs/promises';
 import {
@@ -57,7 +58,7 @@ initialize().catch(console.error);
 
 // <=====[Configuration]=====>
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3-flash-preview";
 
 /*
 `BLOCK_NONE`  -  Always show regardless of probability of unsafe content
@@ -89,7 +90,7 @@ const generationConfig = {
   topP: 0.95,
   // maxOutputTokens: 1000,
   thinkingConfig: {
-    thinkingBudget: -1
+    thinkingLevel: ThinkingLevel.MEDIUM
   }
 };
 
@@ -1923,17 +1924,18 @@ async function handleModelResponse(initialBotMessage, chat, parts, originalMessa
       .setLabel('Stop Generating')
       .setStyle(ButtonStyle.Danger)
     );
+  let botMessages = [];
   let botMessage;
   if (!initialBotMessage) {
     clearInterval(typingInterval);
     try {
-      botMessage = await originalMessage.reply({
+      botMessages[0] = botMessage = await originalMessage.reply({
         content: 'Let me think..',
         components: [stopGeneratingButton]
       });
     } catch (error) {}
   } else {
-    botMessage = initialBotMessage;
+    botMessages[0] = botMessage = initialBotMessage;
     try {
       botMessage.edit({
         components: [stopGeneratingButton]
@@ -1995,14 +1997,27 @@ async function handleModelResponse(initialBotMessage, chat, parts, originalMessa
     } else if (userResponsePreference === 'Embedded') {
       updateEmbed(botMessage, tempResponse, originalMessage, groundingMetadata, urlContextMetadata);
     } else {
-      botMessage.edit({
-        content: tempResponse,
-        embeds: []
-      });
+      let segments = chunkString(tempResponse, maxCharacterLimit);
+      for (const [index, segment] of segments.entries()) {
+        if (typeof botMessages[index] != 'undefined') {
+          botMessages[index].edit({
+            content: segment,
+            embeds: []
+          });
+        }
+      }
     }
     clearTimeout(updateTimeout);
     updateTimeout = null;
   };
+
+  const chunkString = (str, size) => {
+    const chunks = [];
+    for (let i = 0; i < str.length; i += size) {
+      chunks.push(str.substring(i, i + size));
+    }
+    return chunks;
+  }
 
   while (attempts > 0 && !stopGeneration) {
     try {
@@ -2020,7 +2035,7 @@ async function handleModelResponse(initialBotMessage, chat, parts, originalMessa
         });
         for await (const chunk of messageResult) {
           if (stopGeneration) break;
-
+          console.log(chunk.executableCode);
           const chunkText = (chunk.text || (chunk.codeExecutionResult?.output ? `\n\`\`\`py\n${chunk.codeExecutionResult.output}\n\`\`\`\n` : "") || (chunk.executableCode ? `\n\`\`\`\n${chunk.executableCode}\n\`\`\`\n` : ""));
           if (chunkText && chunkText !== '') {
             finalResponse += chunkText;
@@ -2038,21 +2053,32 @@ async function handleModelResponse(initialBotMessage, chat, parts, originalMessa
             urlContextMetadata = chunk.candidates[0].url_context_metadata;
           }
 
-          if (finalResponse.length > maxCharacterLimit) {
-            if (!isLargeResponse) {
-              isLargeResponse = true;
-              const embed = new EmbedBuilder()
-                .setColor(0xFFFF00)
-                .setTitle('Response Overflow')
-                .setDescription('The response got too large, will be sent as a text file once it is completed.');
+          // if (finalResponse.length > maxCharacterLimit) {
+            // if (!isLargeResponse) {
+            //   isLargeResponse = true;
+            //   const embed = new EmbedBuilder()
+            //     .setColor(0xFFFF00)
+            //     .setTitle('Response Overflow')
+            //     .setDescription('The response got too large, will be sent as a text file once it is completed.');
 
-              botMessage.edit({
-                embeds: [embed]
-              });
+            //   botMessage.edit({
+            //     embeds: [embed]
+            //   });
+            // }
+          // } else if (!updateTimeout) {
+          console.log(tempResponse)
+          let segments = chunkString(tempResponse, maxCharacterLimit);
+          for (const [index, segment] of segments.entries()) {
+            if (typeof botMessages[index] === 'undefined') {
+              botMessages[index] = await originalMessage.reply({
+                content: segment,
+                components: [stopGeneratingButton]
+              })
             }
-          } else if (!updateTimeout) {
-            updateTimeout = setTimeout(updateMessage, 500);
           }
+
+          updateTimeout = setTimeout(updateMessage, 500);
+          // }
         }
         newHistory.push({
           role: 'assistant',
@@ -2068,19 +2094,21 @@ async function handleModelResponse(initialBotMessage, chat, parts, originalMessa
         updateEmbed(botMessage, finalResponse, originalMessage, groundingMetadata, urlContextMetadata);
       }
 
-      botMessage = await addSettingsButton(botMessage);
-      if (isLargeResponse) {
-        sendAsTextFile(finalResponse, originalMessage, botMessage.id);
-        botMessage = await addDeleteButton(botMessage, botMessage.id);
-      } else {
-        const shouldAddDownloadButton = originalMessage.guild ? state.serverSettings[originalMessage.guild.id]?.settingsSaveButton : true;
-        if (shouldAddDownloadButton) {
-          botMessage = await addDownloadButton(botMessage);
+      for (let botMessage of botMessages) {
+        botMessage = await addSettingsButton(botMessage);
+        if (isLargeResponse) {
+          sendAsTextFile(finalResponse, originalMessage, botMessage.id);
           botMessage = await addDeleteButton(botMessage, botMessage.id);
         } else {
-          botMessage.edit({
-            components: []
-          });
+          const shouldAddDownloadButton = originalMessage.guild ? state.serverSettings[originalMessage.guild.id]?.settingsSaveButton : true;
+          if (shouldAddDownloadButton) {
+            botMessage = await addDownloadButton(botMessage);
+            botMessage = await addDeleteButton(botMessage, botMessage.id);
+          } else {
+            botMessage.edit({
+              components: []
+            });
+          }
         }
       }
 
@@ -2201,7 +2229,7 @@ function addGroundingMetadataToEmbed(embed, groundingMetadata) {
         return `• Source ${index + 1}`;
       })
       .join('\n');
-    
+
     embed.addFields({
       name: '📚 Sources',
       value: chunks,
@@ -2219,7 +2247,7 @@ function addUrlContextMetadataToEmbed(embed, urlContextMetadata) {
         return `${emoji} ${urlData.retrieved_url}`;
       })
       .join('\n');
-    
+
     embed.addFields({
       name: '🔗 URL Context',
       value: urlList,
@@ -2234,7 +2262,7 @@ function shouldShowGroundingMetadata(message) {
   const userResponsePreference = message.guild && state.serverSettings[message.guild.id]?.serverResponsePreference
     ? state.serverSettings[message.guild.id].responseStyle
     : getUserResponsePreference(userId);
-  
+
   return userResponsePreference === 'Embedded';
 }
 
