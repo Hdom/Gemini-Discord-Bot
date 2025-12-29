@@ -104,6 +104,7 @@ const activities = config.activities.map(activity => ({
 const defaultPersonality = config.defaultPersonality;
 const defaultServerSettings = config.defaultServerSettings;
 const workInDMs = config.workInDMs;
+const admins = config.admins;
 const shouldDisplayPersonalityButtons = config.shouldDisplayPersonalityButtons;
 const SEND_RETRY_ERRORS_TO_DISCORD = config.SEND_RETRY_ERRORS_TO_DISCORD;
 
@@ -127,6 +128,7 @@ import {
 let activityIndex = 0;
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
+  console.log(`admins: ${admins.join(', ')}`);
 
   const rest = new REST().setToken(token);
   try {
@@ -170,8 +172,10 @@ client.on('messageCreate', async (message) => {
 
     const isDM = message.channel.type === ChannelType.DM;
 
+    const shouldWorkInDMs = workInDMs || (admins && admins.includes(message.author.id));
+
     const shouldRespond = (
-      workInDMs && isDM ||
+      shouldWorkInDMs && isDM ||
       state.alwaysRespondChannels[message.channelId] ||
       (message.mentions.users.has(client.user.id) && !isDM) ||
       state.activeUsersInChannels[message.channelId]?.[message.author.id]
@@ -236,7 +240,8 @@ async function handleCommandInteraction(interaction) {
     clear_memory: handleClearMemoryCommand,
     settings: showSettings,
     server_settings: showDashboard,
-    status: handleStatusCommand
+    status: handleStatusCommand,
+    ask: handleAskCommand
   };
 
   const handler = commandHandlers[interaction.commandName];
@@ -354,6 +359,118 @@ async function handleClearMemoryCommand(interaction) {
   }
 }
 
+async function handleAskCommand(interaction) {
+  const isDM = interaction.channel.type === ChannelType.DM || interaction.channel.type === ChannelType.GroupDM;
+  const shouldWorkInDMs = workInDMs || (admins && admins.includes(interaction.user.id));
+
+  // Block only 1-on-1 DMs if workInDMs is disabled (unless user is admin)
+  if (isDM && !shouldWorkInDMs) {
+    const embed = new EmbedBuilder()
+      .setColor(0xFF5555)
+      .setTitle('DM Not Allowed')
+      .setDescription('This bot does not accept direct messages. Please use it in a server channel or group DM.');
+    return interaction.reply({
+      embeds: [embed],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
+  // Check if user is blacklisted
+  if (interaction.guild) {
+    initializeBlacklistForGuild(interaction.guild.id);
+    if (state.blacklistedUsers[interaction.guild.id].includes(interaction.user.id)) {
+      const embed = new EmbedBuilder()
+        .setColor(0xFF0000)
+        .setTitle('Blacklisted')
+        .setDescription('You are blacklisted and cannot use this command.');
+      return interaction.reply({
+        embeds: [embed],
+        flags: MessageFlags.Ephemeral
+      });
+    }
+  }
+
+  // Check if user already has a request in progress
+  if (activeRequests.has(interaction.user.id)) {
+    const embed = new EmbedBuilder()
+      .setColor(0xFFFF00)
+      .setTitle('Request In Progress')
+      .setDescription('Please wait until your previous action is complete.');
+    return interaction.reply({
+      embeds: [embed],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
+  const prompt = interaction.options.getString('prompt');
+
+  activeRequests.add(interaction.user.id);
+
+  try {
+    // Defer the interaction first to acknowledge it
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferReply();
+    }
+
+    // Create a pseudo-message object that mimics Discord message structure
+    let isFirstReply = true;
+    const pseudoMessage = {
+      author: interaction.user,
+      channel: interaction.channel,
+      guild: interaction.guild || null,
+      mentions: {
+        users: new Map()
+      },
+      attachments: new Map(),
+      reply: async (options) => {
+        let reply;
+        if (isFirstReply) {
+          // First reply uses editReply on the deferred interaction
+          isFirstReply = false;
+          reply = await interaction.editReply(options);
+          // Override edit() to use editReply for the initial deferred response
+          if (reply) {
+            reply.edit = async (editOptions) => {
+              return interaction.editReply(editOptions);
+            };
+          }
+        } else {
+          // Subsequent replies use followUp
+          reply = await interaction.followUp(options);
+          // Override edit() to use message.edit() for follow-ups (normal messages)
+          // No need to override, the real message.edit() will work
+        }
+        return reply;
+      },
+      edit: async (options) => {
+        // Use editReply to update the deferred response
+        return interaction.editReply(options);
+      },
+      content: prompt
+    };
+
+    // Use the existing message handling logic
+    await handleTextMessage(pseudoMessage);
+  } catch (error) {
+    console.error('Error handling ask command:', error);
+    const embed = new EmbedBuilder()
+      .setColor(0xFF0000)
+      .setTitle('Error')
+      .setDescription('An error occurred while processing your request.');
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ embeds: [embed] });
+      } else {
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      }
+    } catch (replyError) {
+      console.error('Error sending error reply:', replyError);
+    }
+  } finally {
+    activeRequests.delete(interaction.user.id);
+  }
+}
+
 async function handleCustomPersonalityCommand(interaction) {
   const serverCustomEnabled = interaction.guild ? state.serverSettings[interaction.guild.id]?.customServerPersonality : false;
   if (!serverCustomEnabled) {
@@ -433,9 +550,11 @@ async function handleTextMessage(message) {
     await addSettingsButton(botMessage);
     return;
   }
-  message.channel.sendTyping();
+
+  // Try to send typing indicator, but don't fail if it doesn't work (e.g., in some DM contexts)
+  message.channel.sendTyping().catch(() => {});
   const typingInterval = setInterval(() => {
-    message.channel.sendTyping();
+    message.channel.sendTyping().catch(() => {});
   }, 4000);
   setTimeout(() => {
     clearInterval(typingInterval);
@@ -2035,7 +2154,6 @@ async function handleModelResponse(initialBotMessage, chat, parts, originalMessa
         });
         for await (const chunk of messageResult) {
           if (stopGeneration) break;
-          console.log(chunk.executableCode);
           const chunkText = (chunk.text || (chunk.codeExecutionResult?.output ? `\n\`\`\`py\n${chunk.codeExecutionResult.output}\n\`\`\`\n` : "") || (chunk.executableCode ? `\n\`\`\`\n${chunk.executableCode}\n\`\`\`\n` : ""));
           if (chunkText && chunkText !== '') {
             finalResponse += chunkText;
@@ -2066,7 +2184,6 @@ async function handleModelResponse(initialBotMessage, chat, parts, originalMessa
             //   });
             // }
           // } else if (!updateTimeout) {
-          console.log(tempResponse)
           let segments = chunkString(tempResponse, maxCharacterLimit);
           for (const [index, segment] of segments.entries()) {
             if (typeof botMessages[index] === 'undefined') {
@@ -2100,7 +2217,7 @@ async function handleModelResponse(initialBotMessage, chat, parts, originalMessa
           sendAsTextFile(finalResponse, originalMessage, botMessage.id);
           botMessage = await addDeleteButton(botMessage, botMessage.id);
         } else {
-          const shouldAddDownloadButton = originalMessage.guild ? state.serverSettings[originalMessage.guild.id]?.settingsSaveButton : true;
+          const shouldAddDownloadButton = originalMessage.guild ? state.serverSettings[originalMessage.guild.id]?.settingsSaveButton : false;
           if (shouldAddDownloadButton) {
             botMessage = await addDownloadButton(botMessage);
             botMessage = await addDeleteButton(botMessage, botMessage.id);

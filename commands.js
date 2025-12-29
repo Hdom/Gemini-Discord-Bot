@@ -1,5 +1,18 @@
 const commands = [
   {
+    name: "ask",
+    description: "Ask the bot a question with a custom prompt.",
+    contexts: [0, 1, 2],
+    options: [
+      {
+        name: "prompt",
+        description: "The prompt or question to send to the bot.",
+        type: 3,
+        required: true
+      }
+    ]
+  },
+  {
     name: "respond_to_all",
     description: "Ensures the bot always responds to all messages in this channel.",
     options: [
