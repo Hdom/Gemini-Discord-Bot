@@ -107,6 +107,7 @@ const workInDMs = config.workInDMs;
 const admins = config.admins;
 const shouldDisplayPersonalityButtons = config.shouldDisplayPersonalityButtons;
 const SEND_RETRY_ERRORS_TO_DISCORD = config.SEND_RETRY_ERRORS_TO_DISCORD;
+const contextMessagesCount = config.contextMessagesCount || 0;
 
 
 
@@ -536,6 +537,46 @@ async function handleTextMessage(message) {
   const channelId = message.channel.id;
   let messageContent = message.content.replace(new RegExp(`<@!?${botId}>`), '').trim();
 
+  // Fetch recent messages as context if configured
+  let contextMessages = '';
+  if (contextMessagesCount > 0) {
+    try {
+      const messages = await message.channel.messages.fetch({ limit: contextMessagesCount + 1 });
+      const messageArray = Array.from(messages.values())
+        .reverse()
+        .filter(m => m.id !== message.id) // Exclude the current message
+        .slice(-contextMessagesCount); // Get the last N messages
+
+      if (messageArray.length > 0) {
+        contextMessages = '\n\n--- Recent Channel Context ---\n' +
+          messageArray.map(m => {
+            const author = m.author.bot ? `${m.author.username} (Bot)` : m.author.username;
+            return `[${author}]: ${m.content || '[No text content]'}`;
+          }).join('\n') +
+          '\n--- End of Context ---\n\n';
+      }
+    } catch (error) {
+      console.error('Error fetching context messages:', error);
+    }
+  }
+
+  // Check if this message is a reply to another message
+  let replyContext = '';
+  if (message.reference && message.reference.messageId) {
+    try {
+      const referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
+      if (referencedMessage) {
+        const refAuthor = referencedMessage.author.bot
+          ? `${referencedMessage.author.username} (Bot)`
+          : referencedMessage.author.username;
+        const refContent = referencedMessage.content || '[No text content]';
+        replyContext = `\n\n--- Message Being Replied To ---\n[${refAuthor}]: ${refContent}\n--- End of Referenced Message ---\n\nUser's Reply: `;
+      }
+    } catch (error) {
+      console.error('Error fetching referenced message:', error);
+    }
+  }
+
   if (messageContent === '' && !(message.attachments.size > 0 && hasSupportedAttachments(message))) {
     if (activeRequests.has(userId)) {
       activeRequests.delete(userId);
@@ -582,14 +623,14 @@ async function handleTextMessage(message) {
         embeds: [embed]
       });
 
-      parts = await processPromptAndMediaAttachments(messageContent, message);
+      parts = await processPromptAndMediaAttachments(contextMessages + replyContext + messageContent, message);
       embed.setDescription(updateEmbedDescription('[☑️]', '[☑️]', '### All checks done. Waiting for the response...'));
       await botMessage.edit({
         embeds: [embed]
       });
     } else {
       messageContent = await extractFileText(message, messageContent);
-      parts = await processPromptAndMediaAttachments(messageContent, message);
+      parts = await processPromptAndMediaAttachments(contextMessages + replyContext + messageContent, message);
     }
   } catch (error) {
     return console.error('Error initialising message', error);
