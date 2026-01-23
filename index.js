@@ -551,7 +551,7 @@ async function handleTextMessage(message) {
         contextMessages = '\n\n--- Recent Channel Context ---\n' +
           messageArray.map(m => {
             const author = m.author.bot ? `${m.author.username} (Bot)` : m.author.username;
-            return `[${author}]: ${m.content || '[No text content]'}`;
+            return `[${author}]{${m.author?.id}}: ${m.content || '[No text content]'}`;
           }).join('\n') +
           '\n--- End of Context ---\n\n';
       }
@@ -570,7 +570,7 @@ async function handleTextMessage(message) {
           ? `${referencedMessage.author.username} (Bot)`
           : referencedMessage.author.username;
         const refContent = referencedMessage.content || '[No text content]';
-        replyContext = `\n\n--- Message Being Replied To ---\n[${refAuthor}]: ${refContent}\n--- End of Referenced Message ---\n\nUser's Reply: `;
+        replyContext = `\n\n--- Message Being Replied To ---\n[${refAuthor}]{${referencedMessage.author?.id}}: ${refContent}\n--- End of Referenced Message ---\n\nUser's Reply: `;
       }
     } catch (error) {
       console.error('Error fetching referenced message:', error);
@@ -623,14 +623,14 @@ async function handleTextMessage(message) {
         embeds: [embed]
       });
 
-      parts = await processPromptAndMediaAttachments(contextMessages + replyContext + messageContent, message);
+      parts = await processPromptAndMediaAttachments(messageContent, message);
       embed.setDescription(updateEmbedDescription('[☑️]', '[☑️]', '### All checks done. Waiting for the response...'));
       await botMessage.edit({
         embeds: [embed]
       });
     } else {
       messageContent = await extractFileText(message, messageContent);
-      parts = await processPromptAndMediaAttachments(contextMessages + replyContext + messageContent, message);
+      parts = await processPromptAndMediaAttachments(messageContent, message);
     }
   } catch (error) {
     return console.error('Error initialising message', error);
@@ -653,14 +653,15 @@ async function handleTextMessage(message) {
   if (guildId) {
     const userInfo = {
       username: message.author.username,
-      displayName: message.author.displayName
+      displayName: message.author.displayName,
+      userID: message.author?.id
     };
-    infoStr = `\nYou are currently engaging with users in the ${message.guild.name} Discord server.\n\n## Current User Information\nUsername: \`${userInfo.username}\`\nDisplay Name: \`${userInfo.displayName}\``;
+    infoStr = `\nYou are currently engaging with users in the ${message.guild.name} Discord server.\n\n## Current User Information\nUserID: \`${userInfo.userID}\`\nUsername: \`${userInfo.username}\`\nDisplay Name: \`${userInfo.displayName}\``;
   }
 
   const isServerChatHistoryEnabled = guildId ? state.serverSettings[guildId]?.serverChatHistory : false;
   const isChannelChatHistoryEnabled = guildId ? state.channelWideChatHistory[channelId] : false;
-  const finalInstructions = isServerChatHistoryEnabled ? instructions + infoStr : instructions;
+  const finalInstructions = instructions + contextMessages + replyContext + infoStr;
   const historyId = isChannelChatHistoryEnabled ? (isServerChatHistoryEnabled ? guildId : channelId) : userId;
 
   // Always enable all three tools: Google Search, URL Context, and Code Execution
