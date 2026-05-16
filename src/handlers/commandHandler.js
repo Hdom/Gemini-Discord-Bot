@@ -17,6 +17,7 @@ import { getActiveSessionDetails } from '../services/sessionService.js';
 import {
   STATUS_LIFETIME_MS,
   STATUS_REFRESH_INTERVAL_MS,
+  WORK_IN_DMS,
 } from '../constants.js';
 import { addSettingsButton } from '../ui/messageActions.js';
 import { showDashboard, showChannelDashboard, showSettings } from '../ui/settingsViews.js';
@@ -217,6 +218,7 @@ export async function handleCommandInteraction(interaction) {
         return showChannelDashboard(cmd);
       },
       status: handleStatusCommand,
+      ask: handleAskCommand,
     };
 
     const handler = handlers[interaction.commandName];
@@ -237,3 +239,42 @@ export async function handleCommandInteraction(interaction) {
   }
 }
 
+async function handleAskCommand(interaction) {
+  const pseudoMessage = {
+    author: interaction.user,
+    channel: interaction.channel,
+    guild: interaction.guild || null,
+    mentions: {
+      users: new Map()
+    },
+    attachments: new Map(),
+    reply: async (options) => {
+      let reply;
+      if (isFirstReply) {
+        // First reply uses editReply on the deferred interaction
+        isFirstReply = false;
+        reply = await interaction.editReply(options);
+        // Override edit() to use editReply for the initial deferred response
+        if (reply) {
+          reply.edit = async (editOptions) => {
+            return interaction.editReply(editOptions);
+          };
+        }
+      } else {
+        // Subsequent replies use followUp
+        reply = await interaction.followUp(options);
+        // Override edit() to use message.edit() for follow-ups (normal messages)
+        // No need to override, the real message.edit() will work
+      }
+      return reply;
+    },
+    edit: async (options) => {
+      // Use editReply to update the deferred response
+      return interaction.editReply(options);
+    },
+    content: prompt
+  };
+
+  // Use the existing message handling logic
+  await handleMessageCreate(pseudoMessage);
+}

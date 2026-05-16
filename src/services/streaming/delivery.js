@@ -64,6 +64,7 @@ export async function handleLargeOrFinalResponse(
   isLargeResponse,
   deleteHistoryRef,
   extraMessageIds = [],
+  botMessages = null,
 ) {
   const showButtons = shouldShowActionButtons(
     originalMessage.guild?.id,
@@ -71,7 +72,13 @@ export async function handleLargeOrFinalResponse(
     originalMessage.channelId,
   );
 
-  let updatedMessage = await clearMessageActionRows(botMessage);
+  const messages = botMessages || [botMessage];
+
+  // Clear action rows on all messages
+  let updatedMessage = botMessage;
+  for (const msg of messages) {
+    await clearMessageActionRows(msg);
+  }
 
   if (showButtons) {
     updatedMessage = await addSettingsButton(updatedMessage);
@@ -99,8 +106,13 @@ export async function handleLargeOrFinalResponse(
     return updatedMessage;
   }
 
-  const targets = [updatedMessage.id, ...extraMessageIds];
-  updatedMessage = await addDownloadButton(updatedMessage);
-  updatedMessage = await addDeleteButton(updatedMessage, targets.join(','), deleteHistoryRef);
-  return updatedMessage;
+  // For multi-message plain text, delete button goes on last message
+  const lastMessage = messages[messages.length - 1];
+  if (messages.length > 1) {
+    await addSettingsButton(lastMessage);
+  }
+  const allMessageIds = messages.map((m) => m.id);
+  const targets = [...allMessageIds, ...extraMessageIds];
+  await addDeleteButton(lastMessage, targets.join(','), deleteHistoryRef);
+  return lastMessage;
 }

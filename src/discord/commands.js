@@ -24,4 +24,11 @@ export const commands = Object.freeze([
     option.setName('user').setDescription('The user to unblock.').setRequired(true),
   ),
   new SlashCommandBuilder().setName('status').setDescription('Displays bot CPU and RAM usage in detail.'),
+  new SlashCommandBuilder()
+    .setName('ask')
+    .setDescription('Ask a question to the bot.')
+    .setContexts(InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel)
+    .addStringOption((option) =>
+      option.setName('prompt').setDescription('The question to ask.').setRequired(true),
+    ),
 ]);

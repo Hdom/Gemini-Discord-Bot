@@ -112,6 +112,38 @@ export function buildFinalSystemInstruction(personality, userToolPreferences) {
 const MAX_CHANNEL_MESSAGE_LENGTH = 500;
 
 /**
+ * Fetches the message being replied to (if any) and formats it
+ * as a context section for the system instructions.
+ */
+async function fetchReplyContext(message) {
+  if (!message.reference?.messageId) return '';
+
+  try {
+    const referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
+    if (!referencedMessage) return '';
+
+    const refAuthor = referencedMessage.author.bot
+      ? `${referencedMessage.author.username} (Bot)`
+      : referencedMessage.author.username;
+    let content = referencedMessage.content || '[No text content]';
+    if (content.length > MAX_CHANNEL_MESSAGE_LENGTH) {
+      content = `${content.slice(0, MAX_CHANNEL_MESSAGE_LENGTH)}... [truncated]`;
+    }
+
+    return (
+      '## Message Being Replied To\n'
+      + 'The user is replying to the following message. Use it to understand the full context of their reply.\n'
+      + '```\n'
+      + `${refAuthor}: ${content}\n`
+      + '```'
+    );
+  } catch (error) {
+    logServiceError('ConversationContext', error, { operation: 'fetchReplyContext' });
+    return '';
+  }
+}
+
+/**
  * Fetches recent messages from the Discord channel and formats them
  * as a context section for the system instructions.
  */
@@ -153,8 +185,11 @@ async function fetchRecentChannelMessages(message) {
 }
 
 export async function buildConversationContext(message, instructions) {
+  // Always include reply context if available (works in both guilds and DMs)
+  const replyContext = await fetchReplyContext(message);
+
   if (!message.guild) {
-    return instructions;
+    return replyContext ? `${instructions}\n${replyContext}` : instructions;
   }
 
   const guildId = message.guild.id;
@@ -184,7 +219,11 @@ export async function buildConversationContext(message, instructions) {
     + 'Different users may have different contexts, questions, and conversation threads.'
   );
 
-  contextSections.push(`## Current Message Sender\n- Username: \`${message.author.username}\`\n- Display Name: \`${message.author.displayName}\``);
+  contextSections.push(`## Current Message Sender\n- UserID: \`${message.author.id}\`\n- Username: \`${message.author.username}\`\n- Display Name: \`${message.author.displayName}\``);
+
+  if (replyContext) {
+    contextSections.push(replyContext);
+  }
 
   const recentContext = await fetchRecentChannelMessages(message);
   if (recentContext) {

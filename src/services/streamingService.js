@@ -66,6 +66,14 @@ function logStreamError(operation, error, metadata = {}) {
   logServiceError('StreamingService', error, { operation, ...metadata });
 }
 
+function chunkString(str, size) {
+  const chunks = [];
+  for (let i = 0; i < str.length; i += size) {
+    chunks.push(str.substring(i, i + size));
+  }
+  return chunks;
+}
+
 
 // ---------------------------------------------------------------------------
 // Conversation persistence
@@ -108,6 +116,7 @@ export async function streamModelResponse({
   const responsePreference = getResponsePreference(originalMessage);
   const maxCharacterLimit = responsePreference === 'Embedded' ? EMBED_RESPONSE_LIMIT : PLAIN_RESPONSE_LIMIT;
   let botMessage = await ensureInitialBotMessage(initialBotMessage, originalMessage);
+  let botMessages = [botMessage];
   let finalized = false;
   let bufferedText = '';
   let updateTimeout = null;
@@ -126,7 +135,9 @@ export async function streamModelResponse({
       activeAbortController.abort();
     }
 
-    await removeStopGeneratingButton(botMessage);
+    for (const msg of botMessages) {
+      await removeStopGeneratingButton(msg);
+    }
   };
 
   const { collector, wasStopped } = createCollector(botMessage, originalMessage, stopActiveGeneration);
@@ -135,7 +146,7 @@ export async function streamModelResponse({
   const accumulator = createStreamAccumulator();
 
   const flushBufferedText = () => {
-    if (wasStopped() || finalized || isLargeResponse) return;
+    if (wasStopped() || finalized) return;
 
     if (!bufferedText.trim()) {
       botMessage.edit(applyEmbedFallback(originalMessage.channel, {
@@ -148,13 +159,31 @@ export async function streamModelResponse({
         logStreamError('flushBufferedTextPlaceholder', error, { messageId: botMessage.id });
       });
     } else if (responsePreference === 'Embedded') {
+      // For embeds, always use single message (Discord embed has own limit)
+      if (isLargeResponse) return;
       buildResponseEmbed(botMessage, bufferedText, originalMessage, accumulator.groundingMetadata, accumulator.urlContextMetadata).catch((error) => {
         logStreamError('flushBufferedTextEmbed', error, { messageId: botMessage.id });
       });
     } else {
-      botMessage.edit({ content: bufferedText, embeds: [] }).catch((error) => {
-        logStreamError('flushBufferedTextPlain', error, { messageId: botMessage.id });
-      });
+      // Plain text — chunk into multiple messages if needed
+      const segments = chunkString(bufferedText, maxCharacterLimit);
+      for (const [index, segment] of segments.entries()) {
+        if (botMessages[index]) {
+          botMessages[index].edit({ content: segment, embeds: [] }).catch((error) => {
+            logStreamError('flushBufferedTextPlain', error, { messageId: botMessages[index].id });
+          });
+        } else {
+          originalMessage.reply({
+            content: segment,
+            embeds: [],
+            allowedMentions: { users: [originalMessage.author.id], repliedUser: false },
+          }).then((msg) => {
+            botMessages[index] = msg;
+          }).catch((error) => {
+            logStreamError('flushBufferedTextPlainFollowUp', error, { userId: originalMessage.author.id });
+          });
+        }
+      }
     }
 
     clearPendingUpdate();
@@ -169,7 +198,32 @@ export async function streamModelResponse({
 
     clearPendingUpdate();
 
-    if (!responseWasLarge) {
+    if (hasResponseText && responsePreference !== 'Embedded') {
+      // Plain text — chunk into multiple messages if needed, delete extras
+      const segments = chunkString(normalizedFinalResponse, maxCharacterLimit);
+      for (const [index, segment] of segments.entries()) {
+        if (botMessages[index]) {
+          await botMessages[index].edit({ content: segment, embeds: [] }).catch((error) => {
+            logStreamError('finalPlainEdit', error, { messageId: botMessages[index].id });
+          });
+        } else {
+          try {
+            botMessages[index] = await originalMessage.reply({
+              content: segment,
+              embeds: [],
+              allowedMentions: { users: [originalMessage.author.id], repliedUser: false },
+            });
+          } catch (error) {
+            logStreamError('finalPlainFollowUp', error, { userId: originalMessage.author.id });
+          }
+        }
+      }
+      // Delete any extra bot messages from streaming (if chunk count shrunk)
+      for (let i = segments.length; i < botMessages.length; i++) {
+        await botMessages[i].delete().catch(() => {});
+      }
+      botMessages = botMessages.slice(0, segments.length);
+    } else if (!responseWasLarge) {
       if (responsePreference === 'Embedded') {
         await buildResponseEmbed(botMessage, normalizedFinalResponse, originalMessage, accumulator.groundingMetadata, accumulator.urlContextMetadata);
       } else {
@@ -196,6 +250,7 @@ export async function streamModelResponse({
       responseWasLarge,
       deleteHistoryRef,
       linkedMessageIds,
+      botMessages,
     );
 
     if (hasResponseText) {
@@ -244,18 +299,26 @@ export async function streamModelResponse({
           }
 
           if (finalResponse.length > maxCharacterLimit) {
-            if (!isLargeResponse) {
-              isLargeResponse = true;
-              clearPendingUpdate();
-              botMessage.edit(applyEmbedFallback(originalMessage.channel, {
-                embeds: [createStatusEmbed({
-                  variant: 'warning',
-                  title: 'Response Overflow',
-                  description: 'This response is too long for a Discord message and will be delivered as an attached file.',
-                })],
-              })).catch((error) => {
-                logStreamError('overflowWarningEdit', error, { messageId: botMessage.id });
-              });
+            if (responsePreference === 'Embedded') {
+              // Embed responses overflow — show warning and send as file
+              if (!isLargeResponse) {
+                isLargeResponse = true;
+                clearPendingUpdate();
+                botMessage.edit(applyEmbedFallback(originalMessage.channel, {
+                  embeds: [createStatusEmbed({
+                    variant: 'warning',
+                    title: 'Response Overflow',
+                    description: 'This response is too long for a Discord message embed and will be delivered as an attached file.',
+                  })],
+                })).catch((error) => {
+                  logStreamError('overflowWarningEdit', error, { messageId: botMessage.id });
+                });
+              }
+            } else {
+              // Plain text — keep streaming, chunking handles it
+              if (!updateTimeout) {
+                updateTimeout = setTimeout(flushBufferedText, STREAM_UPDATE_DEBOUNCE_MS);
+              }
             }
           } else if (!updateTimeout) {
             updateTimeout = setTimeout(flushBufferedText, STREAM_UPDATE_DEBOUNCE_MS);
@@ -281,7 +344,8 @@ export async function streamModelResponse({
         const attemptTimedOut = attemptTimeout?.wasTimedOut?.() || false;
         const wasAborted = wasStopped() || activeAbortController?.signal.aborted;
         if (wasAborted && !attemptTimedOut && (isAbortError(error) || activeAbortController?.signal.aborted)) {
-          await finalizeResponse(bufferedText, bufferedText.length > maxCharacterLimit);
+          const isLarge = responsePreference === 'Embedded' && bufferedText.length > maxCharacterLimit;
+          await finalizeResponse(bufferedText, isLarge);
           return;
         }
 
@@ -313,7 +377,7 @@ export async function streamModelResponse({
             }));
 
             const linkedMessageIds = [
-              botMessage.id,
+              ...botMessages.map(m => m.id),
               ...extraMessageIds,
             ].filter(Boolean);
 
@@ -325,11 +389,15 @@ export async function streamModelResponse({
                 deleteHistoryRef,
               );
 
-              botMessage = await clearMessageActionRows(botMessage);
-              botMessage = await addSettingsButton(botMessage);
-              botMessage = await addDeleteButton(botMessage, [botMessage.id, updatedErrorMessage.id, ...extraMessageIds].join(','), deleteHistoryRef);
+              for (const msg of botMessages) {
+                await clearMessageActionRows(msg);
+                await addSettingsButton(msg);
+                await addDeleteButton(msg, [msg.id, updatedErrorMessage.id, ...extraMessageIds].join(','), deleteHistoryRef);
+              }
             } else {
-              botMessage = await clearMessageActionRows(botMessage);
+              for (const msg of botMessages) {
+                await clearMessageActionRows(msg);
+              }
             }
             finalized = true;
           }
@@ -364,7 +432,9 @@ export async function streamModelResponse({
       clearPendingUpdate();
     }
     if (finalized) {
-      await removeStopGeneratingButton(botMessage);
+      for (const msg of botMessages) {
+        await removeStopGeneratingButton(msg).catch(() => {});
+      }
     }
   }
 }

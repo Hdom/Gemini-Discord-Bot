@@ -1,5 +1,5 @@
 import { ActivityType } from 'discord.js';
-import { HarmBlockThreshold, HarmCategory } from '@google/genai';
+import { HarmBlockThreshold, HarmCategory, ThinkingLevel } from '@google/genai';
 
 import config from '../config.js';
 
@@ -32,6 +32,7 @@ export const DEFAULT_CHANNEL_SETTINGS = Object.freeze({
   ...config.defaultChannelSettings,
 });
 export const WORK_IN_DMS = config.workInDMs;
+export const ADMINS = config.admins;
 export const DISPLAY_PERSONALITY_BUTTONS = config.shouldDisplayPersonalityButtons;
 export const SEND_RETRY_ERRORS_TO_DISCORD = config.SEND_RETRY_ERRORS_TO_DISCORD;
 export const ENABLE_NANO_BANANA_MODE = config.enableNanoBananaMode !== false;
@@ -67,9 +68,6 @@ export const SAFETY_SETTINGS = [
 export const GENERATION_CONFIG = Object.freeze({
   temperature: 1.0,
   topP: 0.95,
-  thinkingConfig: {
-    thinkingBudget: -1,
-  },
 });
 
 export const GEMINI_TOOL_ORDER = Object.freeze(['googleSearch', 'urlContext', 'codeExecution']);
