@@ -85,6 +85,9 @@ export function isGemini3OrNewer(modelName) {
 export function supportsThinking(modelName) {
   if (!modelName) return false;
   const lowerName = modelName.toLowerCase();
+  if (lowerName.includes('-image') || lowerName.includes('imagen')) {
+    return false;
+  }
   return lowerName.includes('gemini-2.5') || 
          lowerName.includes('gemini-3');
 }
