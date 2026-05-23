@@ -30,6 +30,7 @@ import {
   toggleNanoBananaModeState,
   toggleNanoBananaGoogleSearch,
   toggleNanoBananaImageSearch,
+  cycleUserThinkingPreference,
 } from '../state/botState.js';
 import { serializeConversationHistory } from '../services/textSharingService.js';
 import {
@@ -360,6 +361,12 @@ async function toggleActionButtons(interaction) {
   }
 
   toggleUserResponseActionButtons(interaction.user.id);
+  await persistStateChange();
+  return updateGeneralSettingsView(interaction);
+}
+
+async function handleToggleThinkingPreference(interaction) {
+  cycleUserThinkingPreference(interaction.user.id);
   await persistStateChange();
   return updateGeneralSettingsView(interaction);
 }
@@ -817,6 +824,7 @@ export async function handleButtonInteraction(interaction) {
       'remove-personality': handleRemovePersonalityCommand,
       'toggle-response-mode': toggleUserResponsePreference,
       'toggle-action-buttons': toggleActionButtons,
+      'toggle-thinking-preference': handleToggleThinkingPreference,
       'session-settings': showSessionManager,
       'open-create-session-modal': showCreateSessionModal,
       'download-conversation': downloadConversation,

@@ -14,6 +14,7 @@ import {
   getUserNanoBananaMode,
   getUserResponseActionButtons,
   getUserSessions,
+  getUserThinkingPreference,
   isChannelUserActive,
   isUserBlacklisted,
   state,
@@ -194,6 +195,7 @@ export async function updateGeneralSettingsView(interaction) {
     serverSettings?.settingsSaveButton,
     getUserResponseActionButtons(userId),
   );
+  const thinkingPreference = getUserThinkingPreference(userId).toUpperCase();
 
   const buttonConfigs = [
     {
@@ -216,6 +218,12 @@ export async function updateGeneralSettingsView(interaction) {
       emoji: '🔘',
       style: responseActionButtonsEnabled ? ButtonStyle.Success : ButtonStyle.Danger,
       disabled: Boolean(responseActionButtonsDisabledReason),
+    },
+    {
+      customId: 'toggle-thinking-preference',
+      label: `Thinking Effort: ${thinkingPreference}`,
+      emoji: '🧠',
+      style: ButtonStyle.Secondary,
     },
     {
       customId: 'download-conversation',

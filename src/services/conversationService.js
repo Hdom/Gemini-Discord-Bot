@@ -10,6 +10,7 @@ import {
   getHistory,
   getUserGeminiToolPreferences,
   getUserNanoBananaMode,
+  getUserThinkingPreference,
 } from '../state/botState.js';
 import {
   buildGeminiToolsFromPreferences,
@@ -20,6 +21,7 @@ import {
   MODEL,
   SAFETY_SETTINGS,
   SEND_RETRY_ERRORS_TO_DISCORD,
+  buildThinkingConfig,
 } from '../constants.js';
 import { logServiceError } from '../utils/errorHandler.js';
 import {
@@ -113,6 +115,18 @@ async function createChatSession(message) {
     const fullSystemInstruction = buildFinalSystemInstruction(personality, userToolPreferences);
     const instructions = await buildConversationContext(message, fullSystemInstruction);
 
+    let activeModel = MODEL;
+    const nanoBananaMode = getUserNanoBananaMode(message.author.id);
+    const isSharedHistory = isSharedConversation(message);
+    const isSharedPers = isSharedPersonality(message);
+
+    if (ENABLE_NANO_BANANA_MODE && nanoBananaMode.enabled && !isSharedHistory && !isSharedPers) {
+      activeModel = config.nanoBananaModel;
+    }
+
+    const thinkingPreference = getUserThinkingPreference(message.author.id);
+    const thinkingConfig = buildThinkingConfig(activeModel, thinkingPreference);
+
     const chatConfig = {
       systemInstruction: {
         role: 'system',
@@ -122,14 +136,11 @@ async function createChatSession(message) {
       safetySettings: SAFETY_SETTINGS,
     };
 
-    let activeModel = MODEL;
-    const nanoBananaMode = getUserNanoBananaMode(message.author.id);
-    const isSharedHistory = isSharedConversation(message);
-    const isSharedPers = isSharedPersonality(message);
+    if (thinkingConfig) {
+      chatConfig.thinkingConfig = thinkingConfig;
+    }
 
     if (ENABLE_NANO_BANANA_MODE && nanoBananaMode.enabled && !isSharedHistory && !isSharedPers) {
-      activeModel = config.nanoBananaModel;
-
       if (nanoBananaMode.googleSearch && nanoBananaMode.imageSearch) {
         chatConfig.tools = [{ googleSearch: { searchTypes: { imageSearch: {} } } }];
       } else if (nanoBananaMode.googleSearch) {

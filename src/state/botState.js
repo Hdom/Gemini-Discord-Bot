@@ -12,6 +12,7 @@ import {
   cloneDefaultServerSettings,
   normalizeChannelSettings,
   normalizeGeminiToolPreferences,
+  THINKING_PREFERENCES,
 } from '../constants.js';
 import { Mutex } from './mutex.js';
 import {
@@ -52,6 +53,7 @@ export const state = {
   userSessions: {},
   userNanoBananaMode: {},
   userResponseActionButtons: {},
+  userThinkingPreference: {},
 };
 
 export const chatHistoryLock = new Mutex();
@@ -263,6 +265,20 @@ export function toggleUserResponseActionButtons(userId) {
   const current = getUserResponseActionButtons(userId);
   state.userResponseActionButtons[userId] = !current;
   return !current;
+}
+
+/** Get a user's preferred thinking effort level ('minimal', 'low', 'medium', 'high'). */
+export function getUserThinkingPreference(userId) {
+  return state.userThinkingPreference[userId] || config.defaultThinkingPreference || 'medium';
+}
+
+/** Cycle between user thinking effort levels. */
+export function cycleUserThinkingPreference(userId) {
+  const current = getUserThinkingPreference(userId);
+  const currentIndex = THINKING_PREFERENCES.indexOf(current);
+  const nextPreference = THINKING_PREFERENCES[(currentIndex + 1) % THINKING_PREFERENCES.length];
+  state.userThinkingPreference[userId] = nextPreference;
+  return nextPreference;
 }
 
 // ---------------------------------------------------------------------------

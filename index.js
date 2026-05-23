@@ -19,6 +19,7 @@ const config = Object.freeze({
   workInDMs: true,
   shouldDisplayPersonalityButtons: true,
   enableGeminiApiLogging: false,
+  defaultThinkingPreference: 'medium',
   SEND_RETRY_ERRORS_TO_DISCORD: true,
   defaultPersonality:
     "You are Gemini, a large language model trained by Google.",
