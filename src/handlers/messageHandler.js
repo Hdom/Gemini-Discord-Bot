@@ -13,14 +13,16 @@ import { applyEmbedFallback, canSendMessages, createStatusEmbed } from '../utils
 import { logError } from '../utils/errorHandler.js';
 
 function shouldRespondToMessage(message) {
-  const isDirectMessage = message.channel.type === ChannelType.DM;
+  const isDirectMessage = message.channel.type === ChannelType.DM || message.channel.type === ChannelType.GroupDM;
+
+  const shouldWorkInDMs = WORK_IN_DMS || (ADMINS && ADMINS.includes(message.author.id));
 
   if (message.mentions.everyone && !message.mentions.users.has(client.user.id)) {
     return false;
   }
 
   return (
-    (WORK_IN_DMS && isDirectMessage) ||
+    (shouldWorkInDMs && isDirectMessage) ||
     Boolean(state.alwaysRespondChannels[message.channelId]) ||
     (!isDirectMessage && message.mentions.users.has(client.user.id)) ||
     isChannelUserActive(message.channelId, message.author.id)
