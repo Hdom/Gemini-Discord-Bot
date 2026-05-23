@@ -109,14 +109,6 @@ export function getNanoBananaDisabledReason(interaction) {
     return 'Nano Banana mode is disabled in this bot configuration.';
   }
 
-  if (getClearMemoryDisabledReason(interaction)) {
-    return 'Nano Banana mode is not available while server-wide or channel-wide chat history is active.';
-  }
-
-  if (getCustomPersonalityDisabledReason(interaction)) {
-    return 'Nano Banana mode is not available while server-wide or channel-wide personality instructions are active.';
-  }
-
   return null;
 }
 

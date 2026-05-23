@@ -150,14 +150,28 @@ export async function showSettings(interaction, edit = false) {
     );
   }
 
+  let description = 'Manage your personal AI experience from one place.\n\n'
+    + '**Quick Actions**\n'
+    + `${quickActions.join('\n')}`;
+
+  if (ENABLE_NANO_BANANA_MODE && nanoBananaMode.enabled) {
+    const channelId = interaction.channelId ?? interaction.channel?.id;
+    const guildId = interaction.guild?.id;
+    const channelHistory = channelId ? getChannelSettings(channelId).channelWideChatHistory : false;
+    const serverHistory = guildId ? getServerSettings(guildId).serverChatHistory : false;
+    const channelPersonality = channelId ? getChannelSettings(channelId).customChannelPersonality : false;
+    const serverPersonality = guildId ? getServerSettings(guildId).customServerPersonality : false;
+
+    if (channelHistory || serverHistory || channelPersonality || serverPersonality) {
+      description += '\n\n⚠️ **Notice:** While Nano Banana Mode is ON, channel-wide and server-wide history and personality settings are bypassed for your interactions to allow direct communication with the Nano Banana model.';
+    }
+  }
+
   const payload = {
     embeds: [createStatusEmbed({
       variant: 'primary',
       title: 'Control Center',
-      description:
-        'Manage your personal AI experience from one place.\n\n'
-        + '**Quick Actions**\n'
-        + `${quickActions.join('\n')}`,
+      description,
     })],
     components: rows,
   };

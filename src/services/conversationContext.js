@@ -5,14 +5,16 @@
  */
 
 import config from '../../config.js';
-import { DEFAULT_PERSONALITY } from '../constants.js';
+import { DEFAULT_PERSONALITY, ENABLE_NANO_BANANA_MODE } from '../constants.js';
 import {
   getActiveSessionHistoryId,
   getChannelSettings,
   getCustomInstruction,
   getUserResponsePreference,
+  getUserNanoBananaMode,
   state,
 } from '../state/botState.js';
+import { expressesImageGenerationIntent } from '../utils/intentHelpers.js';
 import { logServiceError } from '../utils/errorHandler.js';
 import {
   resolveConversationScope,
@@ -24,12 +26,16 @@ function getConversationScope(message) {
   const guildId = message.guild?.id;
   const channelId = message.channel.id;
 
+  const nanoBananaMode = getUserNanoBananaMode(message.author.id);
+  const isImageIntent = expressesImageGenerationIntent(message.content);
+  const hasNanoBanana = ENABLE_NANO_BANANA_MODE && (nanoBananaMode?.enabled || isImageIntent);
+
   return resolveConversationScope({
     guildId,
     channelId,
     userHistoryId: getActiveSessionHistoryId(message.author.id),
-    channelWideChatHistory: getChannelSettings(channelId).channelWideChatHistory,
-    serverWideChatHistory: Boolean(guildId ? state.serverSettings[guildId]?.serverChatHistory : false),
+    channelWideChatHistory: hasNanoBanana ? false : getChannelSettings(channelId).channelWideChatHistory,
+    serverWideChatHistory: hasNanoBanana ? false : Boolean(guildId ? state.serverSettings[guildId]?.serverChatHistory : false),
   });
 }
 
@@ -62,12 +68,16 @@ export function resolveInstructions(message) {
   const userId = message.author.id;
   const channelSettings = getChannelSettings(channelId);
 
+  const nanoBananaMode = getUserNanoBananaMode(userId);
+  const isImageIntent = expressesImageGenerationIntent(message.content);
+  const hasNanoBanana = ENABLE_NANO_BANANA_MODE && (nanoBananaMode?.enabled || isImageIntent);
+
   return resolveInstructionScope({
     guildId,
     channelId,
     userId,
-    channelCustomEnabled: Boolean(channelSettings.customChannelPersonality),
-    serverCustomEnabled: Boolean(guildId ? state.serverSettings[guildId]?.customServerPersonality : false),
+    channelCustomEnabled: hasNanoBanana ? false : Boolean(channelSettings.customChannelPersonality),
+    serverCustomEnabled: hasNanoBanana ? false : Boolean(guildId ? state.serverSettings[guildId]?.customServerPersonality : false),
     getInstruction: getCustomInstruction,
     defaultInstruction: DEFAULT_PERSONALITY,
   });
@@ -244,6 +254,12 @@ export function isSharedConversation(message) {
 export function isSharedPersonality(message) {
   const guildId = message.guild?.id;
   if (!guildId) return false;
+
+  const nanoBananaMode = getUserNanoBananaMode(message.author.id);
+  const isImageIntent = expressesImageGenerationIntent(message.content);
+  if (ENABLE_NANO_BANANA_MODE && (nanoBananaMode?.enabled || isImageIntent)) {
+    return false;
+  }
 
   const channelId = message.channel.id;
   const channelSettings = getChannelSettings(channelId);

@@ -34,6 +34,7 @@ import {
   resolveInstructions,
   tagPartsWithUser,
 } from './conversationContext.js';
+import { expressesImageGenerationIntent } from '../utils/intentHelpers.js';
 import {
   extractFileText,
   extractYouTubeUrls,
@@ -120,7 +121,10 @@ async function createChatSession(message) {
     const isSharedHistory = isSharedConversation(message);
     const isSharedPers = isSharedPersonality(message);
 
-    if (ENABLE_NANO_BANANA_MODE && nanoBananaMode.enabled && !isSharedHistory && !isSharedPers) {
+    const isImageIntent = expressesImageGenerationIntent(message.content);
+    const useNanoBanana = ENABLE_NANO_BANANA_MODE && (nanoBananaMode.enabled || isImageIntent);
+
+    if (useNanoBanana && !isSharedHistory && !isSharedPers) {
       activeModel = config.nanoBananaModel;
     }
 
@@ -140,10 +144,13 @@ async function createChatSession(message) {
       chatConfig.thinkingConfig = thinkingConfig;
     }
 
-    if (ENABLE_NANO_BANANA_MODE && nanoBananaMode.enabled && !isSharedHistory && !isSharedPers) {
-      if (nanoBananaMode.googleSearch && nanoBananaMode.imageSearch) {
+    if (useNanoBanana && !isSharedHistory && !isSharedPers) {
+      const hasGoogleSearch = nanoBananaMode.enabled ? nanoBananaMode.googleSearch : true;
+      const hasImageSearch = nanoBananaMode.enabled ? nanoBananaMode.imageSearch : true;
+
+      if (hasGoogleSearch && hasImageSearch) {
         chatConfig.tools = [{ googleSearch: { searchTypes: { imageSearch: {} } } }];
-      } else if (nanoBananaMode.googleSearch) {
+      } else if (hasGoogleSearch) {
         chatConfig.tools = [{ googleSearch: {} }];
       }
       // else: no tools - chatConfig.tools stays unset
