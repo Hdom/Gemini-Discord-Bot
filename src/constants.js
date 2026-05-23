@@ -67,10 +67,52 @@ export const SAFETY_SETTINGS = [
 export const GENERATION_CONFIG = Object.freeze({
   temperature: 1.0,
   topP: 0.95,
-  thinkingConfig: {
-    thinkingBudget: -1,
-  },
 });
+
+export const THINKING_PREFERENCES = Object.freeze(['minimal', 'low', 'medium', 'high']);
+
+export function isGemini3OrNewer(modelName) {
+  if (!modelName) return false;
+  const match = modelName.match(/gemini-(\d+(?:\.\d+)?)/i);
+  if (match) {
+    const version = parseFloat(match[1]);
+    return version >= 3.0;
+  }
+  return false;
+}
+
+export function supportsThinking(modelName) {
+  if (!modelName) return false;
+  const lowerName = modelName.toLowerCase();
+  return lowerName.includes('gemini-2.5') || 
+         lowerName.includes('gemini-3');
+}
+
+const BUDGET_MAP = Object.freeze({
+  minimal: 0,
+  low: 1024,
+  medium: 2048,
+  high: -1,
+});
+
+export function buildThinkingConfig(modelName, preference = 'medium') {
+  if (!supportsThinking(modelName)) {
+    return undefined;
+  }
+
+  const normalizedPref = (preference || 'medium').toLowerCase();
+  const safePref = THINKING_PREFERENCES.includes(normalizedPref) ? normalizedPref : 'medium';
+
+  if (isGemini3OrNewer(modelName)) {
+    return {
+      thinkingLevel: safePref.toUpperCase(),
+    };
+  }
+
+  return {
+    thinkingBudget: BUDGET_MAP[safePref],
+  };
+}
 
 export const GEMINI_TOOL_ORDER = Object.freeze(['googleSearch', 'urlContext', 'codeExecution']);
 

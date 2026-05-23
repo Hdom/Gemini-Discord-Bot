@@ -27,6 +27,7 @@ export const PERSISTED_STATE_KEYS = Object.freeze([
   'userSessions',
   'userNanoBananaMode',
   'userResponseActionButtons',
+  'userThinkingPreference',
 ]);
 
 /** Maps each persisted key to its file path on disk. */
@@ -43,6 +44,7 @@ export const FILE_PATHS = Object.freeze({
   userSessions: path.join(DATA_DIR, 'user_sessions.json'),
   userNanoBananaMode: path.join(DATA_DIR, 'user_nano_banana_mode.json'),
   userResponseActionButtons: path.join(DATA_DIR, 'user_response_action_buttons.json'),
+  userThinkingPreference: path.join(DATA_DIR, 'user_thinking_preference.json'),
 });
 
 const SAVE_DEBOUNCE_MS = 2_000;
