@@ -85,6 +85,12 @@ export function isGemini3OrNewer(modelName) {
 export function supportsThinking(modelName) {
   if (!modelName) return false;
   const lowerName = modelName.toLowerCase();
+  
+  if (lowerName.includes('-image') || lowerName.includes('imagen')) {
+    // Only Gemini 3.0+ image models support thinking configurations
+    return isGemini3OrNewer(modelName);
+  }
+  
   return lowerName.includes('gemini-2.5') || 
          lowerName.includes('gemini-3');
 }
@@ -105,6 +111,17 @@ export function buildThinkingConfig(modelName, preference = 'medium') {
   const safePref = THINKING_PREFERENCES.includes(normalizedPref) ? normalizedPref : 'medium';
 
   if (isGemini3OrNewer(modelName)) {
+    const lowerName = modelName.toLowerCase();
+    const isImageModel = lowerName.includes('-image') || lowerName.includes('imagen');
+
+    if (isImageModel) {
+      // Image models (like gemini-3.1-flash-image-preview) only support HIGH and MINIMAL
+      const mappedPref = safePref === 'high' ? 'HIGH' : 'MINIMAL';
+      return {
+        thinkingLevel: mappedPref,
+      };
+    }
+
     return {
       thinkingLevel: safePref.toUpperCase(),
     };
