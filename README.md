@@ -119,8 +119,8 @@ Slash commands are checked on startup and auto-synced when changes are detected.
 
 Core defaults live in `config.js`:
 
-- Default Model: `gemini-flash-lite-latest`
-- Nano Banana Model: `gemini-2.5-flash-image`
+- Default Model: `gemini-3.7-flash`
+- Nano Banana Model: `gemini-3.1-flash-image-preview`
 - Enable Nano Banana Mode: `true`
 - Max generation attempts: `3`
 - Default response mode: `Embedded`
